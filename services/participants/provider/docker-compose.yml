@@ -1,0 +1,140 @@
+services:
+
+  provider-connector-db:
+    image: postgres:15
+    container_name: provider-connector-db
+    restart: always
+    env_file:
+      connector_db/resources/.env
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_data_provider_connector:/var/lib/postgresql/data
+      - ./connector_db/resources/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  provider-controlplane:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:controlplane-0.0.2
+    container_name: provider-controlplane
+    volumes:
+      - ./controlplane/resources:/app/configuration
+    ports:
+      - "8280:8080"
+      - "8281:8081" # WEB_HTTP_MANAGEMENT_PORT
+      - "8282:8082" # WEB_HTTP_PROTOCOL_PORT
+      - "8283:8083" # WEB_HTTP_CONTROL_PORT
+      - "8284:8084" # WEB_HTTP_CATALOG_PORT
+      - "5205:5005" # Usa el puerto de remote debug
+    env_file:
+      controlplane/resources/.env
+    depends_on:
+      - provider-identityhub
+      - provider-connector-db
+
+  provider-dataplane:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:dataplane-0.0.1
+    container_name: provider-dataplane
+    volumes:
+      - ./dataplane/resources:/app/configuration
+    ports:
+      - "8380:8080"
+      - "8383:8083" # WEB_HTTP_CONTROL_PORT
+      - "12001:11001" # EDC_DATAPLANE_API_PUBLIC_BASEURL
+      - "5305:5005" # Usa el puerto de remote debug
+
+    env_file:
+      dataplane/resources/.env
+    depends_on:
+      - provider-controlplane
+
+  provider-identityhub:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:identity-hub-0.0.1
+    container_name: provider-identityhub
+    ports:
+      - "7090:7090" #WEB_HTTP_PORT
+      - "7091:7091" #WEB_HTTP_IDENTITY_PORT
+      - "7092:7092" #WEB_HTTP_PRESENTATION_PORT
+      - "7093:7093" #WEB_HTTP_DID_PORT
+      - "7094:7094" #WEB_HTTP_STS_PORT
+      - "7095:5005" # Usa el puerto de remote debug
+
+    volumes:
+      - ./identityhub/resources:/app/configuration
+    env_file:
+      identityhub/resources/.env
+    restart: always
+    depends_on:
+      provider-sts:
+        condition: service_healthy
+
+  provider-identityhub-db:
+    image: postgres:15
+    container_name: provider-identityhub-db
+    restart: always
+    env_file:
+      identityhub_db/resources/.env
+    ports:
+      - "5436:5432"
+    volumes:
+      - pg_data_provider_identity:/var/lib/postgresql/data
+      - ./identityhub_db/resources/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  provider-sts:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:sts-0.0.1
+    container_name: provider-sts
+    volumes:
+      - ./sts/resources:/app/configuration
+    ports:
+      - "8580:8080" # WEB_HTTP_PORT
+      - "8581:8081" # WEB_HTTP_ACCOUNTS_PORT
+      - "8582:8082" # WEB_HTTP_STS_PORT
+      - "5505:5005" # Usa el puerto de remote debug
+    healthcheck:
+      test: [
+        "CMD", "curl", "-f", "-s",
+        "http://localhost:8080/internal/check/health"
+      ]
+      interval: 10s       # Intervalo entre checks
+      timeout: 5s         # Tiempo máximo de espera por respuesta
+      retries: 3          # Intentos antes de marcar como no saludable
+      start_period: 15s   # Tiempo de gracia para que el servicio inicie
+    env_file:
+      sts/resources/.env
+    depends_on:
+      provider-vault:
+        condition: service_started
+      provider-identityhub-db:
+        condition: service_healthy
+
+  provider-ui2connector:
+    image: registry.i2cat.net/public-edc-scenario/uii2connector:0.1.0
+    container_name: provider-ui2connector
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./ui/resources/config.json:/Ui2Connector/dist/config/config.json
+
+  provider-vault:
+    image: hashicorp/vault:1.18.1
+    container_name: provider-vault
+    restart: always
+    cap_add:
+      - IPC_LOCK  # Necesario para Vault
+    env_file:
+      vault/resources/.env
+    ports:
+      - "8400:8200"
+    command: [ "server", "-dev" ]
+    volumes:
+      - vault_provider_config:/vault/config
+      - vault_provider_data:/vault/data
+volumes:
+  pg_data_provider_connector:
+  pg_data_provider_identity:
+  vault_provider_config:
+  vault_provider_data:

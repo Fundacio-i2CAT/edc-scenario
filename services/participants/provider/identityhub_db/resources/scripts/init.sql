@@ -1,0 +1,3 @@
+CREATE USER identity WITH ENCRYPTED PASSWORD 'identity' SUPERUSER;
+CREATE DATABASE identity;
+\c identity

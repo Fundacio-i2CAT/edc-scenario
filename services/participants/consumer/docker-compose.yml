@@ -1,0 +1,149 @@
+
+services:
+
+  consumer-connector-db:
+    image: postgres:15
+    container_name: consumer-connector-db
+    restart: always
+    env_file:
+      connector_db/resources/.env
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data_consumer_connector:/var/lib/postgresql/data
+      - ./connector_db/resources/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  consumer-controlplane:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:controlplane-0.0.2
+    container_name: consumer-controlplane
+    volumes:
+      - ./controlplane/resources:/app/configuration
+    ports:
+      - "8080:8080"
+      - "8081:8081" # WEB_HTTP_MANAGEMENT_PORT
+      - "8082:8082" # WEB_HTTP_PROTOCOL_PORT
+      - "8083:8083" # WEB_HTTP_CONTROL_PORT
+      - "8084:8084" # WEB_HTTP_CATALOG_PORT
+      - "5005:5005" # Usa el puerto de remote debug
+    env_file:
+      controlplane/resources/.env
+    depends_on:
+      - consumer-identityhub
+      - consumer-connector-db
+
+  consumer-dataplane:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:dataplane-0.0.1
+    container_name: consumer-dataplane
+    volumes:
+      - ./dataplane/resources:/app/configuration
+    ports:
+      - "8180:8080"
+      - "8183:8083" # WEB_HTTP_CONTROL_PORT
+      - "11001:11001" # EDC_DATAPLANE_API_PUBLIC_BASEURL
+      - "5105:5005" # Usa el puerto de remote debug
+
+    env_file:
+      dataplane/resources/.env
+    depends_on:
+      - consumer-controlplane
+
+  consumer-identityhub:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:identity-hub-0.0.1
+    container_name: consumer-identityhub
+    ports:
+      - "7080:7080" #WEB_HTTP_PORT
+      - "7081:7081" #WEB_HTTP_IDENTITY_PORT
+      - "7082:7082" #WEB_HTTP_PRESENTATION_PORT
+      - "7083:7083" #WEB_HTTP_DID_PORT
+      - "7084:7084" #WEB_HTTP_STS_PORT
+      - "7085:5005" # Usa el puerto de remote debug
+
+    volumes:
+      - ./identityhub/resources:/app/configuration
+    env_file:
+      identityhub/resources/.env
+    restart: always
+    depends_on:
+      consumer-sts:
+        condition: service_healthy
+
+  consumer-identityhub-db:
+    image: postgres:15
+    container_name: consumer-identityhub-db
+    restart: always
+    env_file:
+      identityhub_db/resources/.env
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_data_consumer_identity:/var/lib/postgresql/data
+      - ./identityhub_db/resources/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  consumer-sts:
+    image: registry.i2cat.net/public-edc-scenario/connector-builder:sts-0.0.1
+    container_name: consumer-sts
+    volumes:
+      - ./sts/resources:/app/configuration
+    ports:
+      - "8480:8080" # WEB_HTTP_PORT
+      - "8481:8081" # WEB_HTTP_ACCOUNTS_PORT
+      - "8482:8082" # WEB_HTTP_STS_PORT
+      - "5405:5005" # Usa el puerto de remote debug
+    healthcheck:
+      test: [
+        "CMD", "curl", "-f", "-s",
+        "http://localhost:8080/internal/check/health"
+      ]
+      interval: 10s       # Intervalo entre checks
+      timeout: 5s         # Tiempo máximo de espera por respuesta
+      retries: 3          # Intentos antes de marcar como no saludable
+      start_period: 15s   # Tiempo de gracia para que el servicio inicie
+    env_file:
+      sts/resources/.env
+    depends_on:
+        consumer-vault:
+          condition: service_started
+        consumer-identityhub-db:
+          condition: service_healthy
+
+  consumer-ui2connector:
+    image: registry.i2cat.net/public-edc-scenario/uii2connector:0.1.0
+    container_name: consumer-ui2connector
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./ui/resources/config.json:/Ui2Connector/dist/config/config.json
+
+  consumer-vault:
+    image: hashicorp/vault:1.18.1
+    container_name: consumer-vault
+    restart: always
+    cap_add:
+      - IPC_LOCK  # Necesario para Vault
+    env_file:
+      vault/resources/.env
+    ports:
+      - "8300:8200"
+    command: ["server", "-dev"]
+    volumes:
+      - vault_consumer_config:/vault/config
+      - vault_consumer_data:/vault/data
+
+  consumer-http-server:
+    image: registry.i2cat.net/public-edc-scenario/http-server:0.10.1
+    container_name: consumer-http-server
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  pg_data_consumer_connector:
+  pg_data_consumer_identity:
+  vault_consumer_data:
+  vault_consumer_config:

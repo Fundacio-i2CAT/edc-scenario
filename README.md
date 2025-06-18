@@ -1,0 +1,153 @@
+
+# Introduction
+
+![img](i2cat.png)
+
+The Data Space Connector enables participants in a Data Space Ecosystem to provide and consume data as well as to interact with the different data space components of a given ecosystem.
+Through the connector data provides and data rights holders can securly share date and retain the data sovereignty, by controlling with whom and through which conditions they can share the data, and keep the traceability of the data sharing process.
+On the other hand,  data consumer can easily discover and access new data sources.
+
+i2CAT has developed a connector using the EDC connector as a base of our system that enables participants of a data space to easily deploy and run a connector in their own infrastructures.
+The i2CAT EDC Connector is developed with the objective of providing the participants of the pilot use cases of the Data Space Demonstration Center with an easy to use connector.
+
+
+# Architecture and components
+
+![img](architecture.png)
+
+-   **Control Plane:** Manages negotiation, contract agreements, catalog management, and the overall orchestration of data exchanges.
+    It publishes asset metadata and coordinates provisioning and deprovisioning of data access through the Data Plane.
+    It also ensures policy enforcement and integrates with the Identity Hub for identity verification.
+-   **Data Plane:** Acts as a stateless proxy that streams data directly from the Data Source to the remote Data Sink during authorized transfer sessions.
+    It does not persist or buffer data internally.
+    This aligns with the principles of secure, point-to-point data exchange defined by the Dataspace Protocol.
+    The Data Plane requires dedicated data source endpoints (to interface with source systems) and data sink endpoints (to deliver data to consumers).
+    The current implementation supports integration with HTTP-based endpoints, including REST APIs, facilitating compatibility with existing systems.
+-   **Identity Hub:** Ensures secure identity management and authentication through decentralized identifiers (DIDs) and verifiable credentials.
+    It interacts with an external Identity Authority to obtain signed verifiable credentials used in peer-to-peer negotiations.
+-   **STS (Secure Token Service):** Manages secure token issuance and validation, enhancing security for inter-component communications.
+-   **Vault:** Provides secure storage for sensitive credentials and tokens.
+    It is accessed by the STS and other components, such as the oAuth2 extension of the HTTP Data Plane that requires secret management.
+-   **Databases:** Dedicated databases securely persist data for connector operations (Connector DB) and identity management (IdentityHub DB).
+-   **Connector UI:** Offers a user-friendly interface for managing connector configurations, operations, and user interactions with the Control Plane.
+-   **HTTP Server:** Provides an endpoint for any transfer of type `HttpData-PUSH`.
+    Once a file is received, the server saves it in a docker volume.
+
+
+# System requirements
+
+-   **Processor (CPU):** vCPUs (x64 architecture)
+-   **Memory (RAM):** 16 GB
+-   **Storage:** 50 GB SSD (Solid State Drive)
+
+
+# Start the scenario
+
+    docker compose up -d
+
+Wait until the `STATE` of all the following services is `running`.
+
+    docker compose ps --format "table {{.Name}}\t{{.State}}"
+
+    NAME                      STATE
+    consumer-connector-db     running
+    consumer-controlplane     running
+    consumer-dataplane        running
+    consumer-http-server      running
+    consumer-identityhub      running
+    consumer-identityhub-db   running
+    consumer-sts              running
+    consumer-ui2connector     running
+    consumer-vault            running
+    dataspace-issuer          running
+    provider-connector-db     running
+    provider-controlplane     running
+    provider-dataplane        running
+    provider-identityhub      running
+    provider-identityhub-db   running
+    provider-sts              running
+    provider-ui2connector     running
+    provider-vault            running
+
+Now run the `seed.sh` script.
+This script registers the provider with the consumer's identity hub and the consumer with the provider's identity hub by sending their identity and endpoint info, enabling secure communication between them.
+
+    ./seed.sh
+
+    Create consumer participant
+    
+    {"clientId":"did:web:consumer-identityhub%3A7083","apiKey":"ZGlkOndlYjpjb25zdW1lci1pZGVudGl0eWh1YiUzQTcwODM=.g/vjrQ2KOX9w/zRbjipH7Y7tLwDCT5AJcWTOC1CzrgCJNq/9lxLVgtepl18u9sqApj5j++S8oEQzvwoVnyv/tQ==","clientSecret":"7SKLFxucb0NtDRVi"}
+    
+    Create provider participant
+    
+    {"clientId":"did:web:provider-identityhub%3A7093","apiKey":"ZGlkOndlYjpwcm92aWRlci1pZGVudGl0eWh1YiUzQTcwOTM=./eUTs23ICc/Juv8mqBhTTIqSjKoDKBOfMXOjWhThurZ60fKUZHI3F5nABwuJ001zK5OQAxA/24fU21DxZl/SXg==","clientSecret":"npbTMB0hsjOMM0uG"}
+
+To use the connectors, you must first provide a password (for this scenario the password is `password`).
+Do it for the [provider connector](http://localhost:3000/dashboard/myconnector) and the [consumer connector](http://localhost:3001/dashboard/myconnector).
+
+
+# Transfer demo
+
+
+## Provider
+
+
+### Asset creation
+
+From the menu on the left, click on “Asset”.
+From the assets page, click on the button `➕ ASSET`.
+In the new window, fill in the following fields and click on the button `CREATE`.
+
+-   **Asset ID:** asset1
+-   **Asset Name:** asset1
+-   **Data Address Name:** asset1
+-   **Data Address Base URL:** <https://jsonplaceholder.typicode.com/users>
+
+
+### Policy creation
+
+From the menu on the left, click on “Policies”.
+From the policies page, click on the button `➕ POLICY`.
+In the new window, fill in the following fields and click on the button `CREATE`.
+
+-   **Policy ID:** policy1
+
+
+### Contract creation
+
+From the menu on the left, click on “Contract Definitions”.
+From the contract definitions page, click on the button `➕ CONTRACT`.
+In the new window, fill in the following fields and click on the button `CREATE`.
+
+-   **Contract ID:** contract1
+-   **Access Policy ID:** policy1
+-   **Contract Policy ID:** policy1
+-   **Assets Selector \*, separated by (,):** asset1
+
+
+## Consumer
+
+
+### Catalog search and contract negotiation
+
+From the menu on the left, click on “Catalog Browser”.
+From the catalog browser page, click on the button `🔍CATALOG`.
+Click on `ASSET1`.
+In the new window, click on the button `POLICY v` to see the assigned policies.
+Now you can click on `✓ Negotiate contract`.
+
+
+### Data transfer
+
+From the menu on the left, click on “Contract Agreements”.
+From the contract agreements page, click on `ASSET1`.
+In the new window, click on the button `✓ Transfer Asset`.
+Fill in the following fields and click on the button `CREATE`.
+
+-   **Transfer Type:** HttpData-PUSH
+-   **Data Destination Type:** HttpData
+-   **Base URL:** <http://consumer-http-server:8080/save_data>
+
+You can check your transfer status in the “Transfer History” page.
+When the status is `COMPLETED`, you will find the asset in the directory `services/participants/consumer/data/`.
+
